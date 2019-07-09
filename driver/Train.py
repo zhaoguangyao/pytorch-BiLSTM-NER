@@ -7,7 +7,7 @@ import numpy as np
 
 import torch.optim as optim
 import torch.nn.functional as F
-from driver.DataLoader import create_batch_iter, pair_data_variable
+from driver.DataLoader import create_batch_iter, pair_data_variable, pair_data_variable_predict
 
 
 def train(model, train_data, dev_data, test_data, vocab_srcs, vocab_tgts, config):
@@ -104,16 +104,16 @@ def evaluate(model, data, step, vocab_srcs, vocab_tgts, dev_test, config):
     path = os.path.join(config.model_path, dev_test + "_out_" + str(step) + ".txt")
     with open(path, 'w', encoding='utf-8') as output_file:
         for batch in create_batch_iter(data, config.batch_size):
-            feature, target, lengths, mask = pair_data_variable(batch, vocab_srcs, vocab_tgts, config)
+            new_batch, feature, target, lengths, mask = pair_data_variable_predict(batch, vocab_srcs, vocab_tgts, config)
             logit = model(feature, lengths, mask)
 
             # 输出到文件
             k = 0
             predict_result = torch.max(logit, 1)[1].view(target.size())
-            for idx in range(len(batch)):
-                for idj in range(len(batch[idx][0])):
-                    output_file.write(batch[idx][0][idj] + " ")
-                    output_file.write(batch[idx][1][idj] + " ")
+            for idx in range(len(new_batch)):
+                for idj in range(len(new_batch[idx][0])):
+                    output_file.write(new_batch[idx][0][idj] + " ")
+                    output_file.write(new_batch[idx][1][idj] + " ")
                     output_file.write(vocab_tgts.id2word(predict_result[k].item()) + "\n")
                     k += 1
                 output_file.write("\n")
