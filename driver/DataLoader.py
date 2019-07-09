@@ -24,7 +24,7 @@ def create_batch_iter(data, batch_size, shuffle=False):
         yield batch
 
 
-def pair_data_variable(batch, vocab_srcs, vocab_tgts, config):
+def pair_data_variable(batch, vocab_srcs, vocab_tgts, use_cuda):
     batch_size = len(batch)
     batch = sorted(batch, key=lambda b: len(b[0]), reverse=True)
     src_lengths = [len(batch[i][0]) for i in range(batch_size)]
@@ -48,7 +48,7 @@ def pair_data_variable(batch, vocab_srcs, vocab_tgts, config):
             tgt_words[k] = label
             k += 1
 
-    if config.use_cuda:
+    if use_cuda:
         src_words = src_words.cuda()
         tgt_words = tgt_words.cuda()
         src_mask = src_mask.cuda()

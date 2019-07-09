@@ -2,6 +2,7 @@
 import os
 import time
 import torch
+import subprocess
 import numpy as np
 
 import torch.optim as optim
@@ -42,20 +43,19 @@ def train(model, train_data, dev_data, test_data, vocab_srcs, vocab_tgts, config
             torch.nn.utils.clip_grad_norm_(model.parameters(), config.clip_norm)
             optimizer.step()
 
-            correct = (torch.max(logit, 1)[1].view(target.size()) == target).sum().item()
-            accuracy = 100.0 * correct / target.size()[0]
+            accuracy = evaluate_batch(model, batch, target, logit, vocab_tgts, config)
 
             during_time = float(time.time() - start_time)
-            print("Step:{}, Iter:{}, batch:{}, accuracy:{:.4f}({}/{}), time:{:.2f}, loss:{:.6f}"
-                  .format(global_step, iter, batch_iter, accuracy, correct, target.size()[0], during_time, loss_value))
+            print("Step:{}, Iter:{}, batch:{}, accuracy:{:.4f}, time:{:.2f}, loss:{:.6f}"
+                  .format(global_step, iter, batch_iter, accuracy, during_time, loss_value))
 
             batch_iter += 1
             global_step += 1
 
             if batch_iter % config.test_interval == 0 or batch_iter == batch_num:
                 if dev_data is not None:
-                    dev_acc = evaluate(model, dev_data, global_step, vocab_srcs, vocab_tgts, config)
-                test_acc = evaluate(model, test_data, global_step, vocab_srcs, vocab_tgts, config)
+                    dev_acc = evaluate(model, dev_data, global_step, vocab_srcs, vocab_tgts, "dev", config)
+                test_acc = evaluate(model, test_data, global_step, vocab_srcs, vocab_tgts, "test", config)
                 if dev_data is not None:
                     if dev_acc > best_acc:
                         print("Exceed best acc: history = %.2f, current = %.2f" % (best_acc, dev_acc))
@@ -72,67 +72,63 @@ def train(model, train_data, dev_data, test_data, vocab_srcs, vocab_tgts, config
         print('one iter using time: time:{:.2f}'.format(during_time))
 
 
-def evaluate(model, data, step, vocab_srcs, vocab_tgts, config):
+def evaluate_batch(model, batch, target, logit, vocab_tgts, config):
     model.eval()
-    start_time = time.time()
-    corrects, size = 0, 0
 
-    f_labels = [vocab_tgts.i2w[i] for i in range(len(vocab_tgts.i2w))]
-    # 每个标签预测正确的
-    f_corrects = [0 for _ in range(len(vocab_tgts.i2w))]
-    # 每个标签预测的个数
-    f_predicts = [0 for _ in range(len(vocab_tgts.i2w))]
-    # 实际上每个标签的数量
-    f_size = [0 for _ in range(len(vocab_tgts.i2w))]
+    path = os.path.join(config.model_path, "batch.txt")
+    with open(path, 'w', encoding='utf-8') as output_file:
+        # 输出到文件
+        k = 0
+        predict_result = torch.max(logit, 1)[1].view(target.size())
+        for idx in range(len(batch)):
+            for idj in range(len(batch[idx][0])):
+                output_file.write(batch[idx][0][idj] + " ")
+                output_file.write(batch[idx][1][idj] + " ")
+                output_file.write(vocab_tgts.id2word(predict_result[k].item()) + "\n")
+                k += 1
+            output_file.write("\n")
 
-    for batch in create_batch_iter(data, config.batch_size):
-        feature, target, lengths, mask = pair_data_variable(batch, vocab_srcs, vocab_tgts, config)
-        logit = model(feature, lengths, mask)
-        correct = (torch.max(logit, 1)[1].view(target.size()) == target).sum().item()
-        corrects += correct
-        size += target.size()[0]
+    p = subprocess.check_output("perl ./driver/conlleval.pl < " + path, shell=True)
+    output = p.decode("utf-8")
+    line2 = output.split('\n')[1]
+    fours = line2.split(';')
+    accuracy = float(fours[0][-6:-1])
 
-        for i in range(len(f_labels)):
-            f_size[i] += (target == i).sum().item()
-            f_predicts[i] += (torch.max(logit, 1)[1].view(target.size()) == i).sum().item()
-            f_corrects[i] += (torch.mul(
-                torch.max(logit, 1)[1].view(target.size()) == i, target == i)).sum().item()
-    accuracy = 100.0 * corrects / size
-    during_time = float(time.time() - start_time)
-    print("\nevaluate result: ")
-    print("Step:{}, accuracy:{:.4f}({}/{}), time:{:.2f}".format(step, accuracy, corrects, size, during_time))
-    is_ok = True
-    for i in range(len(f_labels)):
-        if f_predicts[i] == 0:
-            is_ok = False
-            break
-        if f_corrects[i] == 0:
-            is_ok = False
-            break
-    if is_ok:
-        recall = [0 for _ in range(len(f_labels))]
-        precision = [0 for _ in range(len(f_labels))]
-        f1 = [0 for _ in range(len(f_labels))]
-        for i in range(len(f_labels)):
-            recall[i] = 100.0 * float(f_corrects[i] / f_size[i])
-            precision[i] = 100.0 * float(f_corrects[i] / f_predicts[i])
-            f1[i] = 2.0 / ((1.0 / recall[i]) + (1.0 / precision[i]))
+    model.train()
+    return accuracy
 
-            # print('\npolarity: {}  corrects: {}  predicts: {}  size: {}'.format(f_labels[i], f_corrects[i],
-            #                                                                     f_predicts[i], f_size[i]))
-            # print('polarity: {}  recall: {:.4f}%  precision: {:.4f}%  f1: {:.4f}% \n'.format(f_labels[i], recall[i],
-            #                                                                                  precision[i], f1[i]))
 
-        aver_p = 0
-        aver_r = 0
-        aver_f1 = 0
-        for i in range(len(f_labels)):
-            aver_p += precision[i]
-            aver_r += recall[i]
-            aver_f1 += f1[i]
-        print("precision: ", aver_p / len(f_labels))
-        print("recall: ", aver_r / len(f_labels))
-        print("macro f1: ", aver_f1 / len(f_labels))
+def evaluate(model, data, step, vocab_srcs, vocab_tgts, dev_test, config):
+    model.eval()
+
+    path = os.path.join(config.model_path, dev_test + "_out_" + str(step) + ".txt")
+    with open(path, 'w', encoding='utf-8') as output_file:
+        for batch in create_batch_iter(data, config.batch_size):
+            feature, target, lengths, mask = pair_data_variable(batch, vocab_srcs, vocab_tgts, config)
+            logit = model(feature, lengths, mask)
+
+            # 输出到文件
+            k = 0
+            predict_result = torch.max(logit, 1)[1].view(target.size())
+            for idx in range(len(batch)):
+                for idj in range(len(batch[idx][0])):
+                    output_file.write(batch[idx][0][idj] + " ")
+                    output_file.write(batch[idx][1][idj] + " ")
+                    output_file.write(vocab_tgts.id2word(predict_result[k].item()) + "\n")
+                    k += 1
+                output_file.write("\n")
+
+    p = subprocess.check_output("perl ./driver/conlleval.pl < " + path, shell=True)
+    output = p.decode("utf-8")
+    line2 = output.split('\n')[1]
+    fours = line2.split(';')
+    accuracy = float(fours[0][-6:-1])
+    precision = float(fours[1][-6:-1])
+    recall = float(fours[2][-6:-1])
+    f1 = float(fours[3][-6:-1])
+
+    print('accuracy: {:.4f} precision: {:.4f}% recall: {:.4f}% f1: {:.4f}% \n'.format(accuracy, precision,
+                                                                                      recall, f1))
 
     model.train()
     return accuracy
