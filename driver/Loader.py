@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 import torch
 import numpy as np
-from torch.autograd import Variable
 
 
 def create_batch_iter(data, batch_size, shuffle=False):
@@ -35,7 +34,7 @@ def pair_data_variable(batch, vocab_srcs, vocab_tgts, use_cuda):
 
     src_words = torch.zeros([max_src_length, batch_size], dtype=torch.int64, requires_grad=False)
     tgt_words = torch.zeros([src_length], dtype=torch.int64, requires_grad=False)
-    src_mask = torch.zeros([batch_size, max_src_length], dtype=torch.uint8, requires_grad=False)
+    src_mask = torch.zeros([batch_size, max_src_length], dtype=torch.bool, requires_grad=False)
 
     k = 0
     for idx, instance in enumerate(batch):
@@ -67,7 +66,7 @@ def pair_data_variable_predict(batch, vocab_srcs, vocab_tgts, use_cuda):
 
     src_words = torch.zeros([max_src_length, batch_size], dtype=torch.int64, requires_grad=False)
     tgt_words = torch.zeros([src_length], dtype=torch.int64, requires_grad=False)
-    src_mask = torch.zeros([batch_size, max_src_length], dtype=torch.uint8, requires_grad=False)
+    src_mask = torch.zeros([batch_size, max_src_length], dtype=torch.bool, requires_grad=False)
 
     k = 0
     for idx, instance in enumerate(batch):

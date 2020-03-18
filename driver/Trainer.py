@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import os
+import sys
 import time
 import torch
 import subprocess
@@ -32,7 +33,7 @@ def train(model, train_data, dev_data, test_data, vocab_srcs, vocab_tgts, config
         batch_iter = 0
         for batch in create_batch_iter(train_data, config.batch_size, shuffle=True):
             start_time = time.time()
-            feature, target, lengths, mask = pair_data_variable(batch, vocab_srcs, vocab_tgts, config)
+            feature, target, lengths, mask = pair_data_variable(batch, vocab_srcs, vocab_tgts, config.use_cuda)
             model.train()
             optimizer.zero_grad()
             logit = model(feature, lengths, mask)
@@ -43,7 +44,7 @@ def train(model, train_data, dev_data, test_data, vocab_srcs, vocab_tgts, config
             torch.nn.utils.clip_grad_norm_(model.parameters(), config.clip_norm)
             optimizer.step()
 
-            accuracy = evaluate_batch(model, batch, target, logit, vocab_tgts, config)
+            accuracy = evaluate_batch(batch, target, logit, vocab_tgts, config)
 
             during_time = float(time.time() - start_time)
             print("Step:{}, Iter:{}, batch:{}, accuracy:{:.4f}, time:{:.2f}, loss:{:.6f}"
@@ -72,53 +73,68 @@ def train(model, train_data, dev_data, test_data, vocab_srcs, vocab_tgts, config
         print('one iter using time: time:{:.2f}'.format(during_time))
 
 
-def evaluate_batch(model, batch, target, logit, vocab_tgts, config):
-    model.eval()
-
-    path = os.path.join(config.model_path, "batch.txt")
-    with open(path, 'w', encoding='utf-8') as output_file:
-        # 输出到文件
-        k = 0
+def evaluate_batch(batch, target, logit, vocab_tgts, config):
+    ori_path = os.path.join(config.model_path, 'ori_batch.txt')
+    with open(ori_path, 'w', encoding='utf-8') as output_file:
+        idk = 0
         predict_result = torch.max(logit, 1)[1].view(target.size())
         for idx in range(len(batch)):
             for idj in range(len(batch[idx][0])):
                 output_file.write(batch[idx][0][idj] + " ")
                 output_file.write(batch[idx][1][idj] + " ")
-                output_file.write(vocab_tgts.id2word(predict_result[k].item()) + "\n")
-                k += 1
+                output_file.write(vocab_tgts.id2word(predict_result[idk].item()) + "\n")
+                idk += 1
             output_file.write("\n")
+    m_system = sys.platform
+    unix_path = os.path.join(config.model_path, 'unix_batch.txt')
+    if m_system == 'win32':
+        sp = subprocess.check_call("perl -p -e 's/\\r$//' < " + ori_path + " > " + unix_path, shell=True)
+        assert sp == 0
+    elif m_system == 'linux':
+        sp = subprocess.check_call('cp ' + ori_path + ' ' + unix_path, shell=True)
+        assert sp == 0
+    else:
+        print('没有使用过这个系统')
 
-    p = subprocess.check_output("perl ./driver/conlleval.pl < " + path, shell=True)
-    output = p.decode("utf-8")
+    perl_res = subprocess.check_output("perl ./driver/conlleval.pl < " + unix_path, shell=True)
+    output = perl_res.decode("utf-8")
     line2 = output.split('\n')[1]
     fours = line2.split(';')
     accuracy = float(fours[0][-6:-1])
-
-    model.train()
     return accuracy
 
 
 def evaluate(model, data, step, vocab_srcs, vocab_tgts, dev_test, config):
     model.eval()
-
-    path = os.path.join(config.model_path, dev_test + "_out_" + str(step) + ".txt")
-    with open(path, 'w', encoding='utf-8') as output_file:
+    ori_path = os.path.join(config.model_path, dev_test + "_ori_" + str(step) + ".txt")
+    with open(ori_path, 'w', encoding='utf-8') as output_file:
         for batch in create_batch_iter(data, config.batch_size):
             new_batch, feature, target, lengths, mask = pair_data_variable_predict(batch, vocab_srcs, vocab_tgts, config)
             logit = model(feature, lengths, mask)
 
             # 输出到文件
-            k = 0
+            idk = 0
             predict_result = torch.max(logit, 1)[1].view(target.size())
             for idx in range(len(new_batch)):
                 for idj in range(len(new_batch[idx][0])):
                     output_file.write(new_batch[idx][0][idj] + " ")
                     output_file.write(new_batch[idx][1][idj] + " ")
-                    output_file.write(vocab_tgts.id2word(predict_result[k].item()) + "\n")
-                    k += 1
+                    output_file.write(vocab_tgts.id2word(predict_result[idk].item()) + "\n")
+                    idk += 1
                 output_file.write("\n")
 
-    p = subprocess.check_output("perl ./driver/conlleval.pl < " + path, shell=True)
+    m_system = sys.platform
+    unix_path = os.path.join(config.model_path, dev_test + "_unix_" + str(step) + ".txt")
+    if m_system == 'win32':
+        sp = subprocess.check_call("perl -p -e 's/\\r$//' < " + ori_path + " > " + unix_path, shell=True)
+        assert sp == 0
+    elif m_system == 'linux':
+        sp = subprocess.check_call('cp ' + ori_path + ' ' + unix_path, shell=True)
+        assert sp == 0
+    else:
+        print('没有使用过这个系统')
+
+    p = subprocess.check_output("perl ./driver/conlleval.pl < " + unix_path, shell=True)
     output = p.decode("utf-8")
     line2 = output.split('\n')[1]
     fours = line2.split(';')
