@@ -7,7 +7,7 @@ import numpy as np
 
 import torch.optim as optim
 import torch.nn.functional as F
-from driver.DataLoader import create_batch_iter, pair_data_variable, pair_data_variable_predict
+from driver.Loader import create_batch_iter, pair_data_variable, pair_data_variable_predict
 
 
 def train(model, train_data, dev_data, test_data, vocab_srcs, vocab_tgts, config):
